@@ -15,6 +15,7 @@ import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.PluginRegistry
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -60,8 +61,8 @@ class CalendarPlugin :
      * decision arrives through the binding's request-permissions-result
      * listener, which resolves the pending channel result.
      */
-    private val permissionResultListener =
-        object : ActivityPluginBinding.RequestPermissionsResultListener {
+    private val permissionResultListener: PluginRegistry.RequestPermissionsResultListener =
+        object : PluginRegistry.RequestPermissionsResultListener {
             override fun onRequestPermissionsResult(
                 requestCode: Int,
                 permissions: Array<String>,
