@@ -1,0 +1,17 @@
+# Flutter / Dart
+.dart_tool/
+build/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Harness / agent state
+.omo/
+.codegraph/
+.codegraph
+.omo
