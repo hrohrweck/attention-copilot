@@ -1,0 +1,301 @@
+# Release workflow.
+#
+# Triggered by a tag `vX.Y.Z` (or manually via workflow_dispatch, optionally
+# with a `version` input). Builds all four targets with `--release`, stamps
+# the version from the tag, and attaches the artifacts to a GitHub Release.
+#
+# Everything here is UNSIGNED. The paid signing paths (Apple notarization,
+# Windows Authenticode, Play Console) are documented in docs/RELEASING.md —
+# the workflow intentionally references no secrets and needs no paid account
+# to go green.
+#
+# Mirrors ci.yml: pinned Flutter 3.47.4 via subosito/flutter-action, the same
+# Linux build prerequisites, analyze + test on every platform before building.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (optional; defaults to the pushed tag)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    name: linux (deb + AppImage + bundle)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.4
+          cache: true
+      - name: Install Linux build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev ninja-build clang cmake pkg-config \
+            libglib2.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libsecret-1-dev libayatana-appindicator3-dev
+      - name: Stamp version from tag
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "::error::ref '$GITHUB_REF_NAME' does not yield a strict vX.Y.Z version; refusing to publish a mislabelled artifact"
+            exit 1
+          }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+      - name: Analyze
+        run: flutter analyze
+      - name: Test
+        run: flutter test
+      - name: Build linux release bundle
+        run: flutter build linux --release --build-name="$VERSION"
+      - name: Package release bundle as tarball
+        run: |
+          mkdir -p dist
+          tar -C build/linux/x64/release/bundle -czf "dist/attention-copilot-${VERSION}-linux-x64.tar.gz" .
+      # BEST-EFFORT: deb + AppImage via fastforge (formerly flutter_distributor,
+      # https://pub.dev/packages/fastforge). Not guaranteed to resolve against
+      # the pinned Dart 3.13.3 forever, and its AppImage maker downloads
+      # appimagetool at runtime; a failure here must not block the release.
+      # The tarball above is the guaranteed Linux artifact, and the exact
+      # local fastforge commands are in docs/RELEASING.md.
+      - name: Build deb + AppImage via fastforge (best-effort)
+        continue-on-error: true
+        run: |
+          dart pub global activate fastforge
+          export PATH="$PATH:$HOME/.pub-cache/bin"
+          fastforge package --platform linux --targets deb,appimage --build-args build-name="$VERSION"
+          # fastforge writes into dist/; leave everything there for the attach step.
+      - name: Upload linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    name: windows (installer exe + bundle)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.4
+          cache: true
+      - name: Stamp version from tag
+        run: |
+          $version = "${{ inputs.version }}"
+          if (-not $version) { $version = $env:GITHUB_REF_NAME -replace '^v', '' }
+          if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+            Write-Error "ref '$env:GITHUB_REF_NAME' does not yield a strict vX.Y.Z version; refusing to publish a mislabelled artifact"
+            exit 1
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+      - name: Analyze
+        run: flutter analyze
+      - name: Test
+        run: flutter test
+      - name: Build windows release
+        run: flutter build windows --release --build-name="$env:VERSION"
+      - name: Package release bundle as zip
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath "dist\attention-copilot-${env:VERSION}-windows-x64.zip" -Force
+      # BEST-EFFORT: unsigned Inno Setup installer. choco's community feed is
+      # occasionally rate-limited; the zip above is the guaranteed Windows
+      # artifact. Authenticode signing is documented in docs/RELEASING.md and
+      # deliberately NOT performed here (no secrets in the pipeline).
+      - name: Build Inno Setup installer (unsigned, best-effort)
+        continue-on-error: true
+        run: |
+          choco install innosetup --no-progress -y
+          $issLines = @(
+            "[Setup]",
+            "AppId={{3B6A9C1E-5F42-4D7A-9C6B-2E8F1A7D4B0C}",
+            "AppName=Attention Copilot",
+            "AppVersion=${env:VERSION}",
+            "AppPublisher=Horst Rohrweck",
+            "AppPublisherURL=https://github.com/hrohrweck/attention-copilot",
+            "AppSupportURL=https://github.com/hrohrweck/attention-copilot",
+            "AppUpdatesURL=https://github.com/hrohrweck/attention-copilot",
+            "DefaultDirName={autopf}\Attention Copilot",
+            "DisableProgramGroupPage=yes",
+            "OutputDir=dist",
+            "OutputBaseFilename=attention-copilot-${env:VERSION}-windows-x64-setup",
+            "Compression=lzma2",
+            "SolidCompression=yes",
+            "WizardStyle=modern",
+            "",
+            "[Files]",
+            'Source: "build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs',
+            "",
+            "[Tasks]",
+            'Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "Additional icons:"',
+            "",
+            "[Icons]",
+            'Name: "{autoprograms}\Attention Copilot"; Filename: "{app}\attention_copilot.exe"',
+            'Name: "{autodesktop}\Attention Copilot"; Filename: "{app}\attention_copilot.exe"; Tasks: desktopicon',
+            "",
+            "[Run]",
+            'Filename: "{app}\attention_copilot.exe"; Description: "Launch Attention Copilot"; Flags: nowait postinstall skipifsilent'
+          )
+          $issLines | Set-Content -Path installer.iss -Encoding utf8
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+      - name: Upload windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    name: macos (app + dmg, unsigned)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.4
+          cache: true
+      - name: Stamp version from tag
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "::error::ref '$GITHUB_REF_NAME' does not yield a strict vX.Y.Z version; refusing to publish a mislabelled artifact"
+            exit 1
+          }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+      - name: Analyze
+        run: flutter analyze
+      - name: Test
+        run: flutter test
+      # UNSIGNED on purpose. The app is only ad-hoc signed by Xcode, so
+      # Gatekeeper will block the first launch — see docs/RELEASING.md for the
+      # right-click → Open consequence and the paid notarization path.
+      - name: Build macos release app (unsigned)
+        run: flutter build macos --release --build-name="$VERSION"
+      - name: Package app zip + dmg
+        run: |
+          mkdir -p dist
+          APP=build/macos/Build/Products/Release/attention_copilot.app
+          ditto -c -k --keepParent "$APP" "dist/attention-copilot-${VERSION}-macos-app.zip"
+          mkdir -p dmg-staging
+          cp -R "$APP" dmg-staging/
+          ln -s /Applications dmg-staging/Applications
+          hdiutil create -volname "Attention Copilot" -srcfolder dmg-staging \
+            -ov -format UDZO "dist/attention-copilot-${VERSION}-macos.dmg"
+      - name: Upload macos artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  android:
+    name: android (apk + aab)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.4
+          cache: true
+      - name: Stamp version from tag
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "::error::ref '$GITHUB_REF_NAME' does not yield a strict vX.Y.Z version; refusing to publish a mislabelled artifact"
+            exit 1
+          }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+      - name: Analyze
+        run: flutter analyze
+      - name: Test
+        run: flutter test
+      # Release builds fall back to the debug signing config (see
+      # android/app/build.gradle.kts) so the pipeline needs no keystore and no
+      # secrets. The real upload-keystore path for Play Console is documented
+      # in docs/RELEASING.md. versionCode is stamped from the run number so it
+      # stays monotonic across releases.
+      - name: Build release apk + aab (debug-signed fallback)
+        run: |
+          flutter build apk --release --build-name="$VERSION" --build-number="${GITHUB_RUN_NUMBER}"
+          flutter build appbundle --release --build-name="$VERSION" --build-number="${GITHUB_RUN_NUMBER}"
+      - name: Collect android artifacts
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/attention-copilot-${VERSION}-android.apk"
+          cp build/app/outputs/bundle/release/app-release.aab "dist/attention-copilot-${VERSION}-android.aab"
+      - name: Upload android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-artifacts
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [linux, windows, macos, android]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: List artifacts to attach
+        run: ls -la artifacts/
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          prerelease: false
+          generate_release_notes: true
+          files: artifacts/*
+          fail_on_unmatched_files: false

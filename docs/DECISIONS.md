@@ -75,6 +75,30 @@ Local verification surface for this todo is therefore `flutter analyze` +
 `flutter test` only. Android SDK levels (`minSdk 26` / `targetSdk 35`) are
 pinned in the Android task (todo 18), not here.
 
+## Packaging and release (todo 25)
+
+- **Unsigned by design.** `.github/workflows/release.yml` (tag `v*`) builds
+  all four targets with `--release`, stamps `--build-name` from the tag
+  (Android `versionCode` from `GITHUB_RUN_NUMBER` for monotonicity), and
+  attaches artifacts via `softprops/action-gh-release` with
+  `permissions: contents: write`. It references **zero secrets** and needs
+  no paid account. The paid signing paths (Apple Developer ID + hardened
+  runtime + notarization + stapling, Windows Authenticode via `signtool`,
+  Play Console with an upload keystore) are documented with exact commands
+  in `docs/RELEASING.md` but deliberately not wired into CI.
+- **Linux deb/AppImage** use `fastforge` (renamed `flutter_distributor`,
+  `dart pub global activate fastforge`); the workflow step is best-effort
+  (`continue-on-error`) because its AppImage maker downloads `appimagetool`
+  at runtime and tool/Dart-version drift is possible — the guaranteed Linux
+  artifact is the `flutter build linux --release` tarball.
+- **Windows installer** uses Inno Setup via `choco` (best-effort,
+  `continue-on-error`); the guaranteed artifact is the release-bundle zip.
+  MSIX was rejected for the unsigned pipeline because MSIX requires a
+  signature by design.
+- **Android release builds fall back to the debug signing config**
+  (`android/app/build.gradle.kts`), so the pipeline needs no keystore; the
+  Play-uploadable signing path lives in `docs/RELEASING.md`.
+
 ## Scaffold decisions
 
 - `flutter create --platforms=linux,windows,macos,android --project-name
