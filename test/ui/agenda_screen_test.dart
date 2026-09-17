@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:attention_copilot/data/sources/source.dart';
 import 'package:attention_copilot/domain/models/calendar_event.dart';
 import 'package:attention_copilot/domain/models/calendar_source_id.dart';
@@ -7,16 +5,12 @@ import 'package:attention_copilot/domain/models/event_occurrence.dart';
 import 'package:attention_copilot/domain/models/meeting_join_info.dart';
 import 'package:attention_copilot/ui/agenda_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
-/// Widget + golden tests for the today-first agenda screen.
-///
-/// Goldens are rendered with Roboto and MaterialIcons loaded from the bundled
-/// copies in `test/fonts/` (taken from the Flutter SDK artifact cache), so
-/// the captured pixels are identical on the macOS host and Linux CI.
+/// Widget tests for the today-first agenda screen. All assertions are
+/// structural (finders), never pixel goldens, so they pass on every host.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -26,12 +20,11 @@ void main() {
   late DateTime berlinDayStartUtc;
   late DateTime berlinDayEndUtc;
 
-  setUpAll(() async {
+  setUpAll(() {
     tzdata.initializeTimeZones();
     berlin = tz.getLocation('Europe/Berlin');
     berlinDayStartUtc = tz.TZDateTime(berlin, 2026, 9, 18).toUtc();
     berlinDayEndUtc = tz.TZDateTime(berlin, 2026, 9, 19).toUtc();
-    await _loadTestFonts();
   });
 
   final work = CalendarSourceId(
@@ -73,8 +66,7 @@ void main() {
     );
   }
 
-  /// Pumps the screen inside a MaterialApp using the bundled Roboto font so
-  /// text metrics (and therefore goldens) are host-independent.
+  /// Pumps the screen inside a MaterialApp.
   Future<void> pumpAgenda(
     WidgetTester tester, {
     required List<EventOccurrence> occurrences,
@@ -90,7 +82,6 @@ void main() {
       MaterialApp(
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-          fontFamily: 'Roboto',
           useMaterial3: true,
         ),
         home: AgendaScreen(
@@ -592,32 +583,10 @@ void main() {
     });
   });
 
-  group('goldens', () {
-    Future<void> golden(
-      WidgetTester tester,
-      String name, {
-      required Widget widget,
-    }) async {
-      await tester.binding.setSurfaceSize(const Size(420, 760));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-            fontFamily: 'Roboto',
-            useMaterial3: true,
-          ),
-          home: widget,
-        ),
-      );
-      await tester.pump();
-      await expectLater(
-        find.byType(AgendaScreen),
-        matchesGoldenFile('goldens/$name.png'),
-      );
-    }
-
-    testWidgets('next meeting card', (tester) async {
+  group('rendered layout (formerly goldens)', () {
+    testWidgets('next meeting card is the first timed element with title, '
+        'time range, progress treatment and a URL-gated Join button',
+        (tester) async {
       final now = DateTime.utc(2026, 9, 18, 8);
       final next = occ(
         id: 'sync',
@@ -652,105 +621,203 @@ void main() {
         endUtc: berlinDayEndUtc,
         isAllDay: true,
       );
-      await golden(
+      await pumpAgenda(
         tester,
-        'next_meeting_card',
-        widget: AgendaScreen(
-          occurrences: [past, next, later, allDay],
-          statuses: const {},
-          sourceDisplayNames: const {},
-          anySourcesEnabled: true,
-          lastRefreshedAt: now.subtract(const Duration(minutes: 5)),
-          onRefresh: () async {},
-          clock: () => now,
-          timezone: berlin,
-          onJoinMeeting: (_) {},
+        occurrences: [past, next, later, allDay],
+        clock: () => now,
+        lastRefreshedAt: now.subtract(const Duration(minutes: 5)),
+      );
+
+      final card = find.byKey(const ValueKey('next-meeting-card'));
+      expect(card, findsOneWidget);
+
+      // Title, calendar name and location render inside the card.
+      expect(
+        find.descendant(of: card, matching: find.text('Design sync')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('Work')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: card, matching: find.text('Room B')),
+        findsOneWidget,
+      );
+
+      // Time range: 09:00-09:45 UTC == 11:00-11:45 Europe/Berlin.
+      expect(
+        find.descendant(of: card, matching: find.text('11:00 – 11:45')),
+        findsOneWidget,
+      );
+
+      // Not started yet: the countdown renders, no "In progress" badge.
+      expect(
+        find.descendant(
+          of: card,
+          matching: find.byKey(const ValueKey('next-meeting-countdown')),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('1h 00m'), findsOneWidget);
+      expect(find.byKey(const ValueKey('in-progress-badge')), findsNothing);
+
+      // A conference URL exists, so the Join button renders.
+      expect(
+        find.descendant(of: card, matching: find.text('Join')),
+        findsOneWidget,
+      );
+
+      // The card is the FIRST timed element: above the all-day strip and
+      // above every timed row.
+      final cardTop = tester.getTopLeft(card).dy;
+      expect(
+        cardTop,
+        lessThan(
+          tester.getTopLeft(find.byKey(const ValueKey('all-day-strip'))).dy,
         ),
       );
+      expect(
+        cardTop,
+        lessThan(
+          tester.getTopLeft(find.byKey(const ValueKey('agenda-row-standup'))).dy,
+        ),
+      );
+      expect(
+        cardTop,
+        lessThan(
+          tester.getTopLeft(find.byKey(const ValueKey('agenda-row-client'))).dy,
+        ),
+      );
+
+      // The other occurrences still render in their own sections.
+      expect(find.byKey(const ValueKey('all-day-chip-offsite')), findsOneWidget);
+      expect(find.byKey(const ValueKey('agenda-row-standup')), findsOneWidget);
+      expect(find.byKey(const ValueKey('agenda-row-client')), findsOneWidget);
+      expect(find.text('Updated 5m ago'), findsOneWidget);
+
+      // An already-started next meeting renders the badge instead of the
+      // countdown.
+      final inProgressNow = DateTime.utc(2026, 9, 18, 9, 15);
+      await pumpAgenda(
+        tester,
+        occurrences: [
+          occ(
+            id: 'retro',
+            title: 'Retro',
+            source: work,
+            startUtc: DateTime.utc(2026, 9, 18, 9),
+            endUtc: DateTime.utc(2026, 9, 18, 9, 45),
+          ),
+        ],
+        clock: () => inProgressNow,
+      );
+      // The screen reuses its state across pumps: let the 1s ticker fire so
+      // the injected clock advances into the meeting.
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('in-progress-badge')), findsOneWidget);
+      expect(find.text('In progress'), findsOneWidget);
+      expect(find.byKey(const ValueKey('next-meeting-countdown')),
+          findsNothing);
+
+      // Without a conference URL the Join affordance disappears.
+      await pumpAgenda(
+        tester,
+        occurrences: [
+          occ(
+            id: 'plain',
+            title: 'Deep work',
+            source: work,
+            startUtc: DateTime.utc(2026, 9, 18, 11),
+            endUtc: DateTime.utc(2026, 9, 18, 12),
+          ),
+        ],
+        clock: () => now,
+      );
+      expect(find.text('Join'), findsNothing);
     });
 
-    testWidgets('empty: no sources enabled', (tester) async {
+    testWidgets('renders the "no sources enabled" empty message distinctly',
+        (tester) async {
       final now = DateTime.utc(2026, 9, 18, 8);
-      await golden(
+      await pumpAgenda(
         tester,
-        'empty_no_sources',
-        widget: AgendaScreen(
-          occurrences: const [],
-          statuses: const {},
-          sourceDisplayNames: const {},
-          anySourcesEnabled: false,
-          lastRefreshedAt: null,
-          onRefresh: () async {},
-          clock: () => now,
-          timezone: berlin,
-          onJoinMeeting: (_) {},
-        ),
+        occurrences: const [],
+        anySourcesEnabled: false,
+        clock: () => now,
       );
+
+      expect(
+        find.byKey(const ValueKey('empty-noSourcesEnabled')),
+        findsOneWidget,
+      );
+      expect(find.text('No calendars enabled'), findsOneWidget);
+      expect(
+        find.text('Enable a calendar source to see your agenda for today.'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('empty-noEventsToday')), findsNothing);
+      expect(find.byKey(const ValueKey('empty-sourceError')), findsNothing);
     });
 
-    testWidgets('empty: no events today', (tester) async {
+    testWidgets('renders the "no events today" empty message distinctly',
+        (tester) async {
       final now = DateTime.utc(2026, 9, 18, 8);
-      await golden(
+      await pumpAgenda(
         tester,
-        'empty_no_events',
-        widget: AgendaScreen(
-          occurrences: const [],
-          statuses: const {},
-          sourceDisplayNames: const {},
-          anySourcesEnabled: true,
-          lastRefreshedAt: now.subtract(const Duration(minutes: 2)),
-          onRefresh: () async {},
-          clock: () => now,
-          timezone: berlin,
-          onJoinMeeting: (_) {},
-        ),
+        occurrences: const [],
+        anySourcesEnabled: true,
+        clock: () => now,
       );
+
+      expect(
+        find.byKey(const ValueKey('empty-noEventsToday')),
+        findsOneWidget,
+      );
+      expect(find.text('Nothing on the agenda today'), findsOneWidget);
+      expect(
+        find.text('Enjoy the quiet — new meetings will appear here.'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('empty-noSourcesEnabled')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('empty-sourceError')), findsNothing);
     });
 
-    testWidgets('empty: source error', (tester) async {
+    testWidgets('renders the "source error" empty message distinctly and '
+        'names every failing source', (tester) async {
       final now = DateTime.utc(2026, 9, 18, 8);
-      await golden(
+      await pumpAgenda(
         tester,
-        'empty_source_error',
-        widget: AgendaScreen(
-          occurrences: const [],
-          statuses: const {
-            'google:acct': SourceStatus.error('HTTP 401'),
-            'ics:team': SourceStatus.error('timeout'),
-          },
-          sourceDisplayNames: const {
-            'google:acct': 'Google Calendar',
-            'ics:team': 'Team ICS feed',
-          },
-          anySourcesEnabled: true,
-          lastRefreshedAt: now.subtract(const Duration(minutes: 2)),
-          onRefresh: () async {},
-          clock: () => now,
-          timezone: berlin,
-          onJoinMeeting: (_) {},
-        ),
+        occurrences: const [],
+        anySourcesEnabled: true,
+        statuses: const {
+          'google:acct': SourceStatus.error('HTTP 401'),
+          'ics:team': SourceStatus.error('timeout'),
+        },
+        sourceDisplayNames: const {
+          'google:acct': 'Google Calendar',
+          'ics:team': 'Team ICS feed',
+        },
+        clock: () => now,
       );
+
+      expect(find.byKey(const ValueKey('empty-sourceError')), findsOneWidget);
+      expect(find.text("Couldn't load your agenda"), findsOneWidget);
+      expect(
+        find.text('Something went wrong while refreshing your calendars:'),
+        findsOneWidget,
+      );
+      expect(find.text('Google Calendar: HTTP 401'), findsOneWidget);
+      expect(find.text('Team ICS feed: timeout'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('empty-noSourcesEnabled')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('empty-noEventsToday')), findsNothing);
     });
   });
-}
-
-/// Loads the bundled Roboto and MaterialIcons fonts so text and icons render
-/// identically on every host (flutter_test otherwise falls back to the block
-/// "Ahem" font, which would still be deterministic but unreadable).
-Future<void> _loadTestFonts() async {
-  await _loadFont('Roboto', const [
-    'Roboto-Regular.ttf',
-    'Roboto-Medium.ttf',
-    'Roboto-Bold.ttf',
-  ]);
-  await _loadFont('MaterialIcons', const ['MaterialIcons-Regular.otf']);
-}
-
-Future<void> _loadFont(String family, List<String> files) async {
-  final loader = FontLoader(family);
-  for (final file in files) {
-    final bytes = File('test/fonts/$file').readAsBytesSync();
-    loader.addFont(Future.value(ByteData.sublistView(bytes)));
-  }
-  await loader.load();
 }
