@@ -87,3 +87,29 @@ pinned in the Android task (todo 18), not here.
   each; real content lands in todos 4-24.
 - No database dependency (no sqflite/drift/isar) — the agenda cache is JSON
   (guardrail). No state framework beyond flutter_riverpod (guardrail).
+
+## ICS parsing (todo 8)
+
+- **Decision: own RFC 5545 subset parser; revisit `icalendar_parser`/`rrule`
+  only if scope grows.** The task checked pub.dev candidates: none covers the
+  needed subset (embedded VTIMEZONE transition building, RECURRENCE-ID with
+  RANGE=THISANDFUTURE, RFC 7986 refresh hints) without pulling a larger
+  dependency graph, so `lib/data/ics/` implements it directly with zero new
+  pub dependencies (pubspec.lock stays stable for sibling tasks).
+- Subset boundaries (documented in `lib/data/ics/ics.dart`): line unfolding
+  per RFC 5545 3.1 (CRLF+WSP is *removed* on unfold), quote-aware property
+  and parameter parsing, VEVENT/VALARM/VTIMEZONE, DATE/DATE-TIME/DURATION/
+  UTC-offset values, RRULE (FREQ SECONDLY..YEARLY, INTERVAL, COUNT, UNTIL,
+  BYMONTH, BYMONTHDAY, BYDAY, BYHOUR/BYMINUTE/BYSECOND, WKST), RDATE, EXDATE,
+  RECURRENCE-ID (single and THISANDFUTURE). BYSETPOS/BYWEEKNO/BYYEARDAY are
+  recognised but deliberately not expanded (recorded as diagnostics).
+- Timezone policy: TZID resolves against embedded VTIMEZONE first (built into
+  a `timezone` package `Location` from STANDARD/DAYLIGHT observances, with
+  transitions materialised for 1970-2099), then the IANA database via
+  `timezone`'s `tz.getLocation`, then - with a recorded diagnostic - the
+  floating zone. Local times are never trusted without a resolution step.
+- Refresh cadence: REFRESH-INTERVAL (RFC 7986) > X-PUBLISHED-TTL
+  (MS-OXCICAL) > 30-minute default, clamped to a 15-minute minimum
+  (`kMinPollInterval`).
+- VALARM is parsed into passive `ProviderReminder` objects only; the alert
+  policy engine remains the single scheduling authority.

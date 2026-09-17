@@ -1,0 +1,10 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//attention-copilot//fixtures//EN
+BEGIN:VEVENT
+UID:iana-fallback@ac.test
+SUMMARY:No embedded zone - IANA fallback
+DTSTART;TZID=Europe/Berlin:20260917T090000
+DTEND;TZID=Europe/Berlin:20260917T093000
+END:VEVENT
+END:VCALENDAR
