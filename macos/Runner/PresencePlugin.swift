@@ -17,8 +17,9 @@ import FlutterMacOS
 ///    `com.apple.screensaver.didstart`/`didstop`) counts as "screen not
 ///    visible".
 ///
-/// Idle detection: `CGEventSourceSecondsSinceLastEventType` on the combined
-/// session state with `kCGAnyInputEventType` (rawValue `UInt32.max`).
+/// Idle detection: `CGEventSource.secondsSinceLastEventType(_:eventType:)` on
+/// the combined session state with `kCGAnyInputEventType`
+/// (rawValue `UInt32.max`).
 ///
 /// Push: the lock/screensaver distributed notifications are forwarded over
 /// an event channel so the Dart side can react to lock transitions without
@@ -149,8 +150,8 @@ class PresencePlugin: NSObject, FlutterStreamHandler {
     // is failable; when the value is not representable the host is not idle.
     let idleSeconds: CFTimeInterval
     if let anyInputEventType = CGEventType(rawValue: UInt32.max) {
-      idleSeconds = CGEventSourceSecondsSinceLastEventType(
-        CGEventSourceStateID.combinedSessionState, anyInputEventType)
+      idleSeconds = CGEventSource.secondsSinceLastEventType(
+        .combinedSessionState, eventType: anyInputEventType)
     } else {
       idleSeconds = 0
     }

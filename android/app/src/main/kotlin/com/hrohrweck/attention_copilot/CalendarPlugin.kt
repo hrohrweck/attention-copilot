@@ -24,8 +24,8 @@ import java.util.concurrent.Executors
  * Exposes, over `MethodChannel("attention_copilot/calendar")`:
  *  * `hasPermission()` - whether `READ_CALENDAR` is currently granted;
  *  * `requestPermission()` - runtime permission request; completes with the
- *    grant decision (the result is delivered via
- *    [ActivityAware.onRequestPermissionsResult]);
+ *    grant decision (delivered through the `ActivityPluginBinding`
+ *    request-permissions-result listener);
  *  * `listCalendars()` - the visible device calendars;
  *  * `listInstances(fromMillis, toMillis)` - occurrences in the window,
  *    read from `CalendarContract.Instances.CONTENT_URI` (pre-expanded
@@ -49,10 +49,35 @@ class CalendarPlugin :
     private var channel: MethodChannel? = null
     private var applicationContext: Context? = null
     private var activity: Activity? = null
+    private var activityBinding: ActivityPluginBinding? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
 
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * `ActivityAware` has no `onRequestPermissionsResult` callback; the grant
+     * decision arrives through the binding's request-permissions-result
+     * listener, which resolves the pending channel result.
+     */
+    private val permissionResultListener =
+        object : ActivityPluginBinding.RequestPermissionsResultListener {
+            override fun onRequestPermissionsResult(
+                requestCode: Int,
+                permissions: Array<String>,
+                grantResults: IntArray,
+            ): Boolean {
+                if (requestCode != REQUEST_CODE_READ_CALENDAR) {
+                    return false
+                }
+                val result = pendingPermissionResult ?: return false
+                pendingPermissionResult = null
+                val granted = grantResults.isNotEmpty() &&
+                    grantResults[0] == PackageManager.PERMISSION_GRANTED
+                result.success(granted)
+                return true
+            }
+        }
 
     // ------------------------------------------------------------------ //
     // FlutterPlugin                                                       //
@@ -73,41 +98,39 @@ class CalendarPlugin :
     }
 
     // ------------------------------------------------------------------ //
-    // ActivityAware - only `requestPermission` needs the Activity; the    //
-    // permission callback is delivered through `onRequestPermissionsResult`//
+    // ActivityAware - only `requestPermission` needs the Activity. The    //
+    // grant decision is delivered through the binding's                   //
+    // request-permissions-result listener registered below.               //
     // ------------------------------------------------------------------ //
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activityBinding = binding
         activity = binding.activity
+        binding.addRequestPermissionsResultListener(permissionResultListener)
     }
 
     override fun onReattachedToActivityForConfigChanges(
         binding: ActivityPluginBinding
     ) {
+        activityBinding = binding
         activity = binding.activity
+        binding.addRequestPermissionsResultListener(permissionResultListener)
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
+        activityBinding?.removeRequestPermissionsResultListener(
+            permissionResultListener
+        )
+        activityBinding = null
         activity = null
     }
 
     override fun onDetachedFromActivity() {
+        activityBinding?.removeRequestPermissionsResultListener(
+            permissionResultListener
+        )
+        activityBinding = null
         activity = null
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<String>,
-        grantResults: IntArray
-    ) {
-        if (requestCode != REQUEST_CODE_READ_CALENDAR) {
-            return
-        }
-        val result = pendingPermissionResult ?: return
-        pendingPermissionResult = null
-        val granted = grantResults.isNotEmpty() &&
-            grantResults[0] == PackageManager.PERMISSION_GRANTED
-        result.success(granted)
     }
 
     // ------------------------------------------------------------------ //
@@ -248,8 +271,11 @@ class CalendarPlugin :
                 // CalendarContract.Instances is the Events x Calendars join with
                 // recurrences pre-expanded; the range is the pair of appended
                 // millis. It carries the calendar columns directly
-                // (CALENDAR_DISPLAY_NAME / ACCOUNT_NAME / VISIBLE), so no
-                // separate Calendars query is needed.
+                // (CALENDAR_DISPLAY_NAME / VISIBLE); ACCOUNT_NAME is not part
+                // of the Instances contract, so the equivalent Calendars
+                // column constant is used - the provider emits the same
+                // "account_name" column for instance rows, so no separate
+                // Calendars query is needed.
                 val uri = ContentUris.appendId(
                     ContentUris.appendId(
                         CalendarContract.Instances.CONTENT_URI.buildUpon(),
@@ -268,7 +294,7 @@ class CalendarPlugin :
                     CalendarContract.Instances.ORGANIZER,
                     CalendarContract.Instances.ACCESS_LEVEL,
                     CalendarContract.Instances.CALENDAR_DISPLAY_NAME,
-                    CalendarContract.Instances.ACCOUNT_NAME,
+                    CalendarContract.Calendars.ACCOUNT_NAME,
                     CalendarContract.Instances.VISIBLE,
                 )
                 val selection = "${CalendarContract.Instances.VISIBLE} = 1"
@@ -311,7 +337,7 @@ class CalendarPlugin :
                         CalendarContract.Instances.CALENDAR_DISPLAY_NAME
                     )
                     val accountCol = cursor.getColumnIndexOrThrow(
-                        CalendarContract.Instances.ACCOUNT_NAME
+                        CalendarContract.Calendars.ACCOUNT_NAME
                     )
                     while (cursor.moveToNext()) {
                         instances.add(
