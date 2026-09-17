@@ -13,6 +13,9 @@ class MainFlutterWindow: NSWindow {
     PresencePlugin.register(
       with: flutterViewController.registrar(forPlugin: "PresencePlugin"))
 
+    EventKitPlugin.register(
+      with: flutterViewController.registrar(forPlugin: "EventKitPlugin"))
+
     super.awakeFromNib()
   }
 }
