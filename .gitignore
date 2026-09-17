@@ -10,6 +10,10 @@ build/
 .DS_Store
 Thumbs.db
 
+# IDE
+.idea/
+*.iml
+
 # Harness / agent state
 .omo/
 .codegraph/
