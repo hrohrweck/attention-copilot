@@ -96,10 +96,11 @@ class PresencePlugin: NSObject, FlutterStreamHandler {
   private func registerObserver(
     name: String, handler: @escaping (Notification) -> Void
   ) {
+    // `suspensionBehavior:` was removed from the Foundation overlay in the
+    // Xcode 26 SDK; the plain block observer is the remaining registration API.
     let token = notificationCenter.addObserver(
       forName: Notification.Name(name),
       object: nil,
-      suspensionBehavior: .deliverImmediately,
       queue: .main,
       using: handler
     )
@@ -144,11 +145,15 @@ class PresencePlugin: NSObject, FlutterStreamHandler {
       locked = true
     }
 
-    let idleSeconds = CGEventSourceSecondsSinceLastEventType(
-      CGEventSourceStateID.combinedSessionState,
-      // kCGAnyInputEventType == ((CGEventType)(~0)).
-      CGEventType(rawValue: UInt32.max)
-    )
+    // kCGAnyInputEventType == ((CGEventType)(~0)). The raw-value initializer
+    // is failable; when the value is not representable the host is not idle.
+    let idleSeconds: CFTimeInterval
+    if let anyInputEventType = CGEventType(rawValue: UInt32.max) {
+      idleSeconds = CGEventSourceSecondsSinceLastEventType(
+        CGEventSourceStateID.combinedSessionState, anyInputEventType)
+    } else {
+      idleSeconds = 0
+    }
 
     return [
       "locked": locked,
