@@ -43,6 +43,18 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Boot receiver: Android discards every scheduled alarm on reboot,
+             so BOOT_COMPLETED sets a persisted flag that the Dart side
+             consumes on the next app start to re-plan all pending triggers
+             from their stored absolute instants (see BootReceiver.kt).
+             It never starts the app, an activity or a service. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            </intent-filter>
+        </receiver>
         <!-- Full-screen ringing surface for meeting alerts: shows over the
              lock screen, turns the screen on, and stays out of recents.
              Single-instance so a re-raised alert reuses the ringing task. -->
