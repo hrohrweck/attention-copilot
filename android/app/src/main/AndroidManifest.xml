@@ -2,6 +2,21 @@
     <!-- Read-only calendar access for the CalendarContract adapter. Read
          scope only: write access is deliberately never requested. -->
     <uses-permission android:name="android.permission.READ_CALENDAR"/>
+
+    <!-- Alert stack: alarm notifications, vibration, and the foreground
+         keep-alive service that runs while an alert rings. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- Exact alarms: SCHEDULE_EXACT_ALARM is user-grantable (Android 14+);
+         USE_EXACT_ALARM is the auto-granted clock/calendar variant accepted
+         for an alarm/calendar app on Play. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+
     <application
         android:label="attention_copilot"
         android:name="${applicationName}"
@@ -28,6 +43,20 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Full-screen ringing surface for meeting alerts: shows over the
+             lock screen, turns the screen on, and stays out of recents.
+             Single-instance so a re-raised alert reuses the ringing task. -->
+        <activity
+            android:name=".AlertActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:taskAffinity="com.hrohrweck.attention_copilot.alert"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"/>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
