@@ -1,0 +1,15 @@
+{
+  // markdownlint configuration for this repo's documentation set.
+  // Run with: npx markdownlint-cli2
+  "globs": ["README.md", "docs/*.md"],
+  "config": {
+    // Documentation uses wide tables and long code/URL lines by design;
+    // line length is not a meaningful constraint here.
+    "MD013": false,
+    // Ordered lists interrupted by code blocks continue their numbering
+    // (e.g. the numbered signing steps in docs/RELEASING.md restart at 3, 4,
+    // 5 after code fences, which the rule's "one"/"ordered" styles both
+    // reject). Continuing numbering across interruptions is deliberate.
+    "MD029": false
+  }
+}
