@@ -26,6 +26,8 @@ class AppSettings {
     required this.alertLeadMinutes,
     required this.snoozeEnabled,
     required this.googleClientId,
+    this.deviceCalendarsEnabled = false,
+    this.enabledDeviceCalendarIds,
     this.unknown = const {},
   });
 
@@ -39,6 +41,16 @@ class AppSettings {
   /// ID is a public identifier, not a secret, so it lives in plain settings.
   /// Tokens and bearer URLs must NOT be stored here - see SecretStore.
   final String? googleClientId;
+
+  /// Whether the Android CalendarContract source ("use this device's
+  /// calendars") is switched on. The READ_CALENDAR permission is only ever
+  /// requested in context when the user flips this to true, never at app
+  /// start.
+  final bool deviceCalendarsEnabled;
+
+  /// CalendarContract calendar ids the user enabled, or null when the user
+  /// has not configured a selection yet (all visible calendars are used).
+  final List<int>? enabledDeviceCalendarIds;
 
   /// Unknown top-level keys from the stored document, preserved on rewrite.
   final Map<String, dynamic> unknown;
@@ -68,6 +80,10 @@ class AppSettings {
       googleClientId: json['googleClientId'] is String
           ? json['googleClientId'] as String
           : null,
+      deviceCalendarsEnabled: json['deviceCalendarsEnabled'] is bool
+          ? json['deviceCalendarsEnabled'] as bool
+          : false,
+      enabledDeviceCalendarIds: _readIntList(json['enabledDeviceCalendarIds']),
       unknown: _unknownKeys(json),
     );
   }
@@ -79,7 +95,32 @@ class AppSettings {
       'alertLeadMinutes': alertLeadMinutes,
       'snoozeEnabled': snoozeEnabled,
       if (googleClientId != null) 'googleClientId': googleClientId,
+      'deviceCalendarsEnabled': deviceCalendarsEnabled,
+      if (enabledDeviceCalendarIds != null)
+        'enabledDeviceCalendarIds': enabledDeviceCalendarIds,
     };
+  }
+
+  /// Returns a copy with the given fields replaced; omitted fields keep the
+  /// current value.
+  AppSettings copyWith({
+    List<int>? alertLeadMinutes,
+    bool? snoozeEnabled,
+    String? googleClientId,
+    bool? deviceCalendarsEnabled,
+    List<int>? enabledDeviceCalendarIds,
+  }) {
+    return AppSettings(
+      schemaVersion: schemaVersion,
+      alertLeadMinutes: alertLeadMinutes ?? this.alertLeadMinutes,
+      snoozeEnabled: snoozeEnabled ?? this.snoozeEnabled,
+      googleClientId: googleClientId ?? this.googleClientId,
+      deviceCalendarsEnabled:
+          deviceCalendarsEnabled ?? this.deviceCalendarsEnabled,
+      enabledDeviceCalendarIds:
+          enabledDeviceCalendarIds ?? this.enabledDeviceCalendarIds,
+      unknown: unknown,
+    );
   }
 
   static List<int>? _readIntList(Object? value) {
@@ -94,6 +135,8 @@ class AppSettings {
       'alertLeadMinutes',
       'snoozeEnabled',
       'googleClientId',
+      'deviceCalendarsEnabled',
+      'enabledDeviceCalendarIds',
     };
     return {
       for (final entry in json.entries)
