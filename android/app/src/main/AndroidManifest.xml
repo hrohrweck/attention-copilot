@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Read-only calendar access for the CalendarContract adapter. Read
+         scope only: write access is deliberately never requested. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR"/>
     <application
         android:label="attention_copilot"
         android:name="${applicationName}"
